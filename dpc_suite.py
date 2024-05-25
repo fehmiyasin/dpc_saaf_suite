@@ -54,6 +54,115 @@ def add_scalebar(data, pix, pix_unit, coord_system,
     
     return(scalebar)
 
+def calc_B_from_ABCD(A, B, C, D,
+                     sv_file_name='', auto_remove_offset=False,
+                     magnetic=True, normalize=True, save_field=False):
+    '''
+    Returns either the in-plane electric or magnetic field depending on the 'magnetic'
+    keyword setting calculated from the DPC pixels A, B, C and D.
+    '''
+
+    # Define a box from which to calculate the DPC offset (center of mass of the beam)
+    box = slice(100,A.shape[0]-100),slice(100,A.shape[1]-100)
+    
+    #Calculate pixel B-D and A-C
+    BD = (np.copy(B)-np.copy(D))
+    AC = (np.copy(A)-np.copy(C))#-np.load(FN_BX)
+
+    if magnetic == False: #calculate electric field
+        #Calculate the x component of the electric field from BD
+        sx = np.copy(BD)
+        if auto_remove_offset == True:
+            offset_sx = (np.max(sx[box]) + np.min(sx[box]))/2
+            sx = np.copy(sx) - offset_sx
+
+        # Calculate sy from AC
+        sy = np.copy(AC)
+        if auto_remove_offset == True:
+            offset_sy = (np.max(sy[box]) - np.abs(np.min(sy[box])))/2
+            sy = np.copy(sy)-offset_sy
+
+    if magnetic == True: #calculate the magnetic field
+        #Calculate sy from BD
+        sy = np.copy(BD)
+        if auto_remove_offset == True:
+            offset_sy = (np.max(sy[box]) + np.min(sy[box]))/2
+            sy = np.copy(sy)-offset_sy
+
+        # Calculate sx from AC
+        sx = -np.copy(AC)
+        if auto_remove_offset == True:
+            offset_sx = (np.max(sx[box]) - np.abs(np.min(sx[box])))/2
+            sx = np.copy(sx)-offset_sx
+    # Normalize the field array
+    s = np.zeros((3,1,np.shape(sx)[0],np.shape(sx)[1]))
+    s[0] = np.copy(sx)
+    s[1] = np.copy(sy)
+    s[2] = np.zeros_like(sx)
+    s_norm = (np.copy(s)/np.max(np.sqrt(s[0] ** 2 + s[1] ** 2 + s[2] ** 2)))
+    #Saves data with shape (nz, ny, nx)
+    if np.logical_and(sv_file_name!='', save_field==True):
+        np.save(str(sv_file_name + '_sx'), s_norm[0])
+        np.save(str(sv_file_name + '_sy'), s_norm[1])
+    return(s_norm)
+
+def calc_dpc_offset(bx, by, box = False, box_width=100):
+    '''Calculates the offset signal, i.e. center of mass of the disc.'''
+  
+    # Define a box from which to calculate the DPC offset (center of
+    # mass of the beam)
+    if box==False:
+        box = slice(bx.shape[0] // 2 - box_width // 2,
+                    bx.shape[0] // 2 + box_width // 2), slice(by.shape[0] // 2 -
+                                                              box_width // 2,
+                                                              by.shape[0] // 2 +
+                                                              box_width // 2)    
+    # Calculate offset from by
+    #offset_by = (np.max(by[box]) + np.min(by[box]))/2
+    offset_by = np.mean(by[box])
+
+    # Calculate offset from bx
+#    offset_bx = (np.max(bx[box]) + np.min(bx[box]))/2
+    offset_bx = np.mean(bx[box])
+    return(offset_bx, offset_by)
+
+def DPC_colormap_from_ABCD(A, B, C, D, #sv_fmt='pdf',
+                           sv_file_name='', auto_remove_offset=False,
+                           im_w=10, arr_w=1/150, arr_scale=20, nm_pix=1.,
+                           arrows=True, m_step=15, normalize=False,
+                           intensity_scale=2,offset_angle=0,
+                           scalebar = True, magnetic = True,
+                           high_saturation=True, max_cutoff=0.5, save_field=False):
+    '''
+    Plot's the DPC colormap with or without arrows from an four pixel
+    annulus detector with horizontal pixels A and C (relatable to B_y) and
+    vertical pixels B and D (relatable to B_x).
+    sv_fmt is the file format you want to save the image as.
+    im_w is the field of view you'd like to save, im_w=0.5 crops the image in
+    half from the center.
+    nm_pix is the pixel length in nm/pix
+    normalize=True will normalize the 2D array for you. Don't use if your data
+    is already normalized.
+    offset_angle rotates the in-plane vector by some user-defined angle in degrees.
+    intensity_scale is the factor by which you want to amplify the intensity of
+    the color in the image.
+    scalebar = True plots a scalebar
+    '''
+    PIX_NEW = nm_pix #nm/pix
+    s_norm = calc_B_from_ABCD(A=A, B=B, C=C, D=D,
+                              sv_file_name=sv_file_name,
+                              auto_remove_offset=auto_remove_offset,
+                              magnetic=magnetic, normalize=normalize,
+                              save_field=save_field)
+    
+    plot_B_3D(b_arr = s_norm[:,0,::-1,:],#sv_fmt='jpg',
+              sv_file_name=sv_file_name,
+              im_w=im_w,arr_w=arr_w,arr_scale=arr_scale, nm_pix=nm_pix,
+              arrows=arrows,
+              m_step=m_step,normalize=normalize,intensity_scale=intensity_scale,
+              offset_angle=offset_angle, scalebar = scalebar,
+              high_saturation=high_saturation, max_cutoff=max_cutoff)
+
 def plot_B_3D(b_arr, sv_file_name = '', sv_fmt = 'png', im_w = 1, nm_pix = 1,
               arr_w = .01, arr_scale = 25, m_step = 0, arrows = True,
               im_only = True, normalize=False, vmin = False, vmax = False,
@@ -200,114 +309,6 @@ def plot_B_3D(b_arr, sv_file_name = '', sv_fmt = 'png', im_w = 1, nm_pix = 1,
                     dpi=300, transparent=True)
     plt.show()
     plt.clf()
-
-def calc_B_from_ABCD(A, B, C, D,
-                     sv_file_name='', auto_remove_offset=False,
-                     magnetic=True, normalize=True):
-    '''
-    Returns either the in-plane electric or magnetic field depending on the 'magnetic'
-    keyword setting calculated from the DPC pixels A, B, C and D.
-    '''
-
-    # Define a box from which to calculate the DPC offset (center of mass of the beam)
-    box = slice(100,A.shape[0]-100),slice(100,A.shape[1]-100)
-    
-    #Calculate pixel B-D and A-C
-    BD = (np.copy(B)-np.copy(D))
-    AC = (np.copy(A)-np.copy(C))#-np.load(FN_BX)
-
-    if magnetic == False: #calculate electric field
-        #Calculate the x component of the electric field from BD
-        sx = np.copy(BD)
-        if auto_remove_offset == True:
-            offset_sx = (np.max(sx[box]) + np.min(sx[box]))/2
-            sx = np.copy(sx) - offset_sx
-
-        # Calculate sy from AC
-        sy = np.copy(AC)
-        if auto_remove_offset == True:
-            offset_sy = (np.max(sy[box]) - np.abs(np.min(sy[box])))/2
-            sy = np.copy(sy)-offset_sy
-
-    if magnetic == True: #calculate the magnetic field
-        #Calculate sy from BD
-        sy = -np.copy(BD)
-        if auto_remove_offset == True:
-            offset_sy = (np.max(sy[box]) + np.min(sy[box]))/2
-            sy = np.copy(sy)-offset_sy
-
-        # Calculate sx from AC
-        sx = np.copy(AC)
-        if auto_remove_offset == True:
-            offset_sx = (np.max(sx[box]) - np.abs(np.min(sx[box])))/2
-            sx = np.copy(sx)-offset_sx
-    # Normalize the field array
-    s = np.zeros((3,1,np.shape(sx)[0],np.shape(sx)[1]))
-    s[0] = np.copy(sx)
-    s[1] = np.copy(sy)
-    s[2] = np.zeros_like(sx)
-    s_norm = (np.copy(s)/np.max(np.sqrt(s[0] ** 2 + s[1] ** 2 + s[2] ** 2)))
-    #Saves data with shape (nz, ny, nx)
-    if sv_file_name!='':
-        np.save(str(sv_file_name + '_sx'), s_norm[0])
-        np.save(str(sv_file_name + '_sy'), s_norm[1])
-    return(s_norm)
-
-def calc_dpc_offset(bx, by, box = False, box_width=100):
-    '''Calculates the offset signal, i.e. center of mass of the disc.'''
-  
-    # Define a box from which to calculate the DPC offset (center of
-    # mass of the beam)
-    if box==False:
-        box = slice(bx.shape[0] // 2 - box_width // 2,
-                    bx.shape[0] // 2 + box_width // 2), slice(by.shape[0] // 2 -
-                                                              box_width // 2,
-                                                              by.shape[0] // 2 +
-                                                              box_width // 2)    
-    # Calculate offset from by
-    #offset_by = (np.max(by[box]) + np.min(by[box]))/2
-    offset_by = np.mean(by[box])
-
-    # Calculate offset from bx
-#    offset_bx = (np.max(bx[box]) + np.min(bx[box]))/2
-    offset_bx = np.mean(bx[box])
-    return(offset_bx, offset_by)
-
-def DPC_colormap_from_ABCD(A, B, C, D, #sv_fmt='pdf',
-                           sv_file_name='', auto_remove_offset=False,
-                           im_w=10, arr_w=1/150, arr_scale=20, nm_pix=1.,
-                           arrows=True, m_step=15, normalize=False,
-                           intensity_scale=2,offset_angle=0,
-                           scalebar = True, magnetic = True,
-                           high_saturation=True, max_cutoff=0.5):
-    '''
-    Plot's the DPC colormap with or without arrows from an four pixel
-    annulus detector with horizontal pixels A and C (relatable to B_y) and
-    vertical pixels B and D (relatable to B_x).
-    sv_fmt is the file format you want to save the image as.
-    im_w is the field of view you'd like to save, im_w=0.5 crops the image in
-    half from the center.
-    nm_pix is the pixel length in nm/pix
-    normalize=True will normalize the 2D array for you. Don't use if your data
-    is already normalized.
-    offset_angle rotates the in-plane vector by some user-defined angle in degrees.
-    intensity_scale is the factor by which you want to amplify the intensity of
-    the color in the image.
-    scalebar = True plots a scalebar
-    '''
-    PIX_NEW = nm_pix #nm/pix
-    s_norm = calc_B_from_ABCD(A=A, B=B, C=C, D=D,
-                              sv_file_name=sv_file_name,
-                              auto_remove_offset=auto_remove_offset,
-                              magnetic=magnetic, normalize=normalize)
-    
-    plot_B_3D(b_arr = s_norm[:,0,::-1,:],#sv_fmt='jpg',
-              sv_file_name=sv_file_name,
-              im_w=im_w,arr_w=arr_w,arr_scale=arr_scale, nm_pix=nm_pix,
-              arrows=arrows,
-              m_step=m_step,normalize=normalize,intensity_scale=intensity_scale,
-              offset_angle=offset_angle, scalebar = scalebar,
-              high_saturation=high_saturation, max_cutoff=max_cutoff)
 
 def remove_outliers_dpc(image, threshold=3):
     # Compute the mean and standard deviation of the image
